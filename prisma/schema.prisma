@@ -1,0 +1,389 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  CUSTOMER
+  COLLECTOR
+  PARTNER
+  ADMIN
+}
+
+enum AccountType {
+  HOUSEHOLD
+  BUSINESS
+}
+
+enum UserStatus {
+  ACTIVE
+  PENDING_VERIFICATION
+  SUSPENDED
+}
+
+enum ServiceType {
+  ONE_TIME
+  RECURRING_WEEKLY
+  RECURRING_BIWEEKLY
+  RECURRING_MONTHLY
+}
+
+enum CollectionStatus {
+  PENDING
+  CONFIRMED
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID_CASH_ON_COLLECTION
+  DIRECT_TRANSFER
+  PENDING_VERIFICATION
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH_ON_DELIVERY
+  TELEBIRR_MANUAL
+  CBE_TRANSFER
+}
+
+enum PaymentRecordStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum ComplaintStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+}
+
+enum OrgType {
+  RECYCLER
+  WASTE_OPERATOR
+  GOVERNMENT
+  COMMERCIAL_BUYER
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  phone        String?     @unique
+  passwordHash String
+  role         Role        @default(CUSTOMER)
+  accountType  AccountType @default(HOUSEHOLD)
+  status       UserStatus  @default(ACTIVE)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  customerProfile CustomerProfile?
+  businessProfile BusinessProfile?
+  pickupRequests  PickupRequest[]
+  assignedJobs    CollectionAssignment[]
+  notifications   Notification[]
+  statusChanges   StatusHistory[]
+  auditLogs       AuditLog[]
+  complaints      Complaint[]
+  memberships     OrganizationMembership[]
+
+  @@index([role])
+  @@index([status])
+}
+
+model CustomerProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  fullName          String
+  preferredLanguage String   @default("en")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedLocations PickupLocation[]
+}
+
+model BusinessProfile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  companyName        String
+  tinNumber          String?
+  contactPersonName  String?
+  contactPersonPhone String?
+  businessType       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedLocations PickupLocation[]
+}
+
+model Organization {
+  id                 String   @id @default(cuid())
+  name               String
+  registrationNumber String?
+  type               OrgType  @default(RECYCLER)
+  isVerified         Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  members          OrganizationMembership[]
+  recyclingCenters RecyclingCenter[]
+}
+
+model OrganizationMembership {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String   @default("MEMBER")
+  joinedAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+model ServiceArea {
+  id         String   @id @default(cuid())
+  subCity    String   @unique
+  isActive   Boolean  @default(true)
+  baseFeeETB Float    @default(100.0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model PickupLocation {
+  id                String   @id @default(cuid())
+  customerProfileId String?
+  businessProfileId String?
+  label             String   @default("Default")
+  subCity           String
+  woreda            String
+  specificArea      String
+  contactPhone      String
+  latitude          Float?
+  longitude         Float?
+  isDefault         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  customerProfile CustomerProfile? @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  businessProfile BusinessProfile? @relation(fields: [businessProfileId], references: [id], onDelete: Cascade)
+  pickupRequests  PickupRequest[]
+
+  @@index([subCity])
+}
+
+model WasteCategory {
+  id                      String   @id @default(cuid())
+  slug                    String   @unique
+  name                    String
+  description             String
+  baseRatePerKgETB        Float
+  requiresSpecialHandling Boolean  @default(false)
+  badgeColor              String   @default("#10B981")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  requestItems      RequestItem[]
+  acceptedAtCenters AcceptedMaterial[]
+}
+
+model PickupRequest {
+  id                     String           @id @default(cuid())
+  requestNumber          String           @unique
+  customerId             String
+  locationId             String
+  serviceType            ServiceType      @default(ONE_TIME)
+  collectionStatus       CollectionStatus @default(PENDING)
+  paymentStatus          PaymentStatus    @default(UNPAID)
+  scheduledDate          DateTime
+  timeSlot               String
+  totalEstimatedWeightKg Float            @default(5.0)
+  quotedPriceETB         Float
+  customerNotes          String?
+  cancellationReason     String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  customer       User                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  location       PickupLocation         @relation(fields: [locationId], references: [id])
+  items          RequestItem[]
+  assignments    CollectionAssignment[]
+  statusHistory  StatusHistory[]
+  paymentRecords PaymentRecord[]
+  complaints     Complaint[]
+
+  @@index([customerId])
+  @@index([collectionStatus])
+  @@index([scheduledDate])
+}
+
+model RequestItem {
+  id                String   @id @default(cuid())
+  requestId         String
+  categoryId        String
+  estimatedWeightKg Float
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  request  PickupRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  category WasteCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([requestId])
+}
+
+model CollectionAssignment {
+  id                 String           @id @default(cuid())
+  requestId          String
+  collectorId        String
+  status             AssignmentStatus @default(ASSIGNED)
+  assignedAt         DateTime         @default(now())
+  acknowledgedAt     DateTime?
+  completedAt        DateTime?
+  collectedWeightKg  Float?
+  completionNotes    String?
+  evidencePhotoUrl   String?
+  failureReason      String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  request   PickupRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  collector User          @relation(fields: [collectorId], references: [id], onDelete: Cascade)
+
+  @@index([collectorId])
+  @@index([status])
+}
+
+model StatusHistory {
+  id           String   @id @default(cuid())
+  requestId    String
+  changedById  String
+  previousStatus String
+  newStatus    String
+  changeReason String?
+  timestamp    DateTime @default(now())
+
+  request   PickupRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  changedBy User          @relation(fields: [changedById], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+}
+
+model RecyclingCenter {
+  id             String   @id @default(cuid())
+  organizationId String?
+  name           String
+  subCity        String
+  woreda         String
+  address        String
+  phone          String
+  operatingHours String
+  isVerified     Boolean  @default(true)
+  latitude       Float?
+  longitude      Float?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization?      @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  acceptedMaterials AcceptedMaterial[]
+
+  @@index([subCity])
+}
+
+model AcceptedMaterial {
+  id                  String   @id @default(cuid())
+  centerId            String
+  categoryId          String
+  minQuantityKg       Float    @default(1.0)
+  buyingPricePerKgETB Float    @default(0.0)
+  dropOffOrPickup     String   @default("DROP_OFF")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  center   RecyclingCenter @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  category WasteCategory   @relation(fields: [categoryId], references: [id])
+
+  @@index([centerId])
+}
+
+model PaymentRecord {
+  id                   String              @id @default(cuid())
+  requestId            String
+  amountETB            Float
+  paymentMethod        PaymentMethod
+  transactionReference String?
+  status               PaymentRecordStatus @default(PENDING)
+  verifiedByAdminId    String?
+  recordedAt           DateTime            @default(now())
+
+  request PickupRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+model Complaint {
+  id            String          @id @default(cuid())
+  userId        String
+  requestId     String?
+  subject       String
+  description   String
+  status        ComplaintStatus @default(OPEN)
+  adminResponse String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  request PickupRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  action       String
+  targetEntity String
+  targetId     String
+  ipAddress    String?
+  details      String?
+  timestamp    DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+}
